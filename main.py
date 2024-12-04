@@ -2,6 +2,7 @@ import torch
 import torchvision.transforms as transforms
 import torchvision
 import PIL
+from model import CNNModel
 
 # Define a series of transformations for the training data.
 train_transform = transforms.Compose([
@@ -42,6 +43,8 @@ def load_data():
 
 def train():
     # Your training code here
+    model = CNNModel()
+
     pass
 
 def test():
