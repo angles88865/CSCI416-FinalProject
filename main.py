@@ -6,6 +6,8 @@ from torch.utils.data import random_split
 import argparse
 import time
 import wandb
+import torch.optim as optim
+from torch.autograd import Variable
 
 from model import CNNModel
 
@@ -81,13 +83,6 @@ def compute_accuracy(y_pred, y_batch):
 	accy = (y_pred==y_batch).sum().item()/y_batch.size(0)
 	return accy
 
-def train():
-    # Your training code here
-    model = CNNModel(args)
-
-    pass
-
-
 def test():
     # Your testing code here
     pass
@@ -108,7 +103,63 @@ def main():
     classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
                'V', 'W', 'X', 'Y', 'Z']
 
-    train()
+    # Your training code here
+    model = CNNModel(args)
+
+    ## load model to gpu or cpu
+    model.to(device)
+
+    ## initialize hyper-parameters
+    num_epoches = args.num_epoches
+    decay = args.decay
+    learning_rate = args.learning_rate
+
+    ## define loss function, optimizer, and scheduler
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0,
+                           amsgrad=False)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=True,
+                                                     min_lr=0)
+
+    ##  model training
+    if args.mode == 'train':
+        model = model.train()  ## model training
+        for epoch in range(num_epoches):  # 10-50
+            ## learning rate
+            #adjust_learning_rate(learning_rate, optimizer, epoch, decay)
+
+            for batch_id, (x_batch, y_labels) in enumerate(train_loader):
+                x_batch, y_labels = Variable(x_batch).to(device), Variable(y_labels).to(device)
+
+                ## feed input data x into model
+                output_y = model(x_batch)
+
+                ##---------------------------------------------------
+                ## write loss function below, refer to tutorial slides
+                ##----------------------------------------------------
+                loss = criterion(output_y, y_labels)
+
+                ##----------------------------------------
+                ## write back propagation below
+                ##----------------------------------------
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()  ## update parameters
+
+                ##------------------------------------------------------
+                ## get the predict result and then compute accuracy below
+                ##------------------------------------------------------
+                # _, y_pred = torch.max(output_y.data, 1)
+                y_pred = torch.argmax(output_y.data, 1)
+                acc = compute_accuracy(y_pred, y_labels)
+
+                ##----------------------------------------------------------
+                ## loss.item() or use tensorboard to monitor the loss blow
+                ## if use loss.item(), you may use log txt files to save loss
+                ##----------------------------------------------------------
+                print("epoch: ", epoch, "batch_id: ", batch_id, "loss: ", loss.item(), "accuracy: ", acc)
+                wandb.log({'loss': loss.item()})
+                wandb.log({'accuracy': acc})
     test()
 
 if __name__ == '__main__':
