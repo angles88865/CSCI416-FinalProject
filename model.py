@@ -37,9 +37,21 @@ class CNNModel(nn.Module):
 
         )
 
+        output_size_func = lambda input_size, kernel_size, padding, stride: (
+                                                                                        input_size - kernel_size + 2 * padding) // stride + 1
+        in_size = 28
+        output_size = 0
+        for i in range(4):
+            output_size = output_size_func(in_size, kernel, padding, stride)
+            if i in [0, 1]:
+                output_size = (output_size - kernel_pool) // stride_pool + 1
+            in_size = output_size
+
+        out_size = 10 * output_size * output_size
+
         self.dense = nn.Sequential(
 
-            nn.Linear(10 * 7 * 7, 1000),
+            nn.Linear(96040, 1000),
             nn.ReLU(),
             nn.Linear(1000, 500),
             nn.Dropout(0.2),
@@ -53,6 +65,6 @@ class CNNModel(nn.Module):
 
         x_out = self.conv(x)
         flattened = torch.flatten(x_out, 1)  # x_out is output of last layer
-        result = self.fc(flattened)
+        result = self.dense(flattened)
 
         return result

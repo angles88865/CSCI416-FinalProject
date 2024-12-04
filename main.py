@@ -8,6 +8,8 @@ import time
 import wandb
 import torch.optim as optim
 from torch.autograd import Variable
+import numpy as np
+import matplotlib.pyplot as plt
 
 from model import CNNModel
 
@@ -39,6 +41,7 @@ args = parser.parse_args()
 
 # Define a series of transformations for the training data.
 train_transform = transforms.Compose([
+    transforms.Resize((100, 100)), # Resize the images to 100x100 pixels.
     transforms.RandomHorizontalFlip(p=0.5),  # Randomly flip the images horizontally 50% of the time.
     transforms.RandomAffine(  # Apply random affine transformations to the images.
         degrees=(-5, 5),  # Rotate by degrees between -5 and 5.
@@ -57,10 +60,17 @@ test_transform = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # Normalize tensors with mean and standard deviation.
 ])
 
+
 def load_data():
-    #get the dataset
-    dataset = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1/asl_alphabet_train',
+    # get the dataset
+    dataset = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1',
                                                transform=train_transform)
+
+    # Print dataset information
+    print(f"Total dataset size: {len(dataset)}")
+    print(f"Number of classes: {len(dataset.classes)}")
+    print("Class names:", dataset.classes)
+
     dataset_size = len(dataset)
     train_size = int(0.8 * dataset_size)  # 80% for training
     val_size = dataset_size - train_size  # Remaining 20% for validation
@@ -68,13 +78,51 @@ def load_data():
     train_set, val_set = random_split(dataset, [train_size, val_size])
 
     # Create data loaders for the training and validation sets.
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=128, shuffle=True, num_workers=8)
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=128, shuffle=False, num_workers=8)
+    train_loader = torch.utils.data.DataLoader(
+        train_set,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=4,  # Use multiple workers for faster data loading
+        pin_memory=True  # Can improve performance if using GPU
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_set,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True
+    )
 
     # Load the ASL dataset for testing and apply test transformations.
     test_set = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1/asl_alphabet_test',
                                                 transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=128, shuffle=False, num_workers=8)
+    test_loader = torch.utils.data.DataLoader(
+        test_set,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True
+    )
+
+    # Debug: Verify data loader
+    print("\nTraining Loader:")
+    for batch_idx, (inputs, labels) in enumerate(train_loader):
+        print(f"Batch {batch_idx}:")
+        print(f"  Input shape: {inputs.shape}")
+        print(f"  Labels shape: {labels.shape}")
+        print(f"  Unique labels in batch: {torch.unique(labels)}")
+        if batch_idx < 2:  # Print only first 2 batches
+            continue
+        break
+
+    # Assuming 'labels' is the tensor with your labels
+    unique, counts = np.unique(labels, return_counts=True)
+
+    plt.bar(unique, counts)
+    plt.xlabel('Class Labels')
+    plt.ylabel('Frequency')
+    plt.title('Label Distribution')
+    plt.show()
 
     return train_loader, test_loader, val_loader
 
@@ -93,6 +141,7 @@ def main():
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     torch.cuda.set_device(device=0)
+    torch.cuda.empty_cache()
     print("device: ", device)
     if use_cuda:
         torch.cuda.manual_seed(72)
@@ -118,52 +167,76 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0,
                            amsgrad=False)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=True,
-                                                     min_lr=0)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, min_lr=0)
 
-    ##  model training
+    # Verify model and data
+    print(f"Model: {model}")
+    print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
+    # Get data loaders
     if args.mode == 'train':
-        model = model.train()  ## model training
-        for epoch in range(num_epoches):  # 10-50
-            ## learning rate
-            #adjust_learning_rate(learning_rate, optimizer, epoch, decay)
+        model.train()
 
-            for batch_id, (x_batch, y_labels) in enumerate(train_loader):
-                x_batch, y_labels = Variable(x_batch).to(device), Variable(y_labels).to(device)
+        for epoch in range(num_epoches):
+            print(f"\nEpoch {epoch}/{num_epoches}")
+            print("-" * 20)
 
-                ## feed input data x into model
-                output_y = model(x_batch)
+            epoch_loss = 0.0
+            epoch_correct = 0
+            epoch_total = 0
 
-                ##---------------------------------------------------
-                ## write loss function below, refer to tutorial slides
-                ##----------------------------------------------------
-                loss = criterion(output_y, y_labels)
+            for batch_idx, (inputs, labels) in enumerate(train_loader):
+                # Move to device
+                inputs, labels = inputs.to(device), labels.to(device)
 
-                ##----------------------------------------
-                ## write back propagation below
-                ##----------------------------------------
+                # Zero the parameter gradients
                 optimizer.zero_grad()
+
+                # Forward pass
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
+                # Backward pass and optimize
                 loss.backward()
-                optimizer.step()  ## update parameters
+                optimizer.step()
 
-                ##------------------------------------------------------
-                ## get the predict result and then compute accuracy below
-                ##------------------------------------------------------
-                # _, y_pred = torch.max(output_y.data, 1)
-                y_pred = torch.argmax(output_y.data, 1)
-                acc = compute_accuracy(y_pred, y_labels)
+                # Compute accuracy
+                _, predicted = torch.max(outputs.data, 1)
+                epoch_total += labels.size(0)
+                epoch_correct += (predicted == labels).sum().item()
 
-                ##----------------------------------------------------------
-                ## loss.item() or use tensorboard to monitor the loss blow
-                ## if use loss.item(), you may use log txt files to save loss
-                ##----------------------------------------------------------
-                print("epoch: ", epoch, "batch_id: ", batch_id, "loss: ", loss.item(), "accuracy: ", acc)
-                wandb.log({'loss': loss.item()})
-                wandb.log({'accuracy': acc})
+                # Batch-level logging
+                batch_acc = (predicted == labels).float().mean().item()
+                print(f"Batch {batch_idx}: Loss = {loss.item():.4f}, Batch Accuracy = {batch_acc:.4f}")
+
+                # Accumulate epoch loss
+                epoch_loss += loss.item()
+
+                # Optional: Break if batch limit reached for debugging
+                # if batch_idx > 10:
+                #     break
+
+            # Epoch-level metrics
+            epoch_loss /= len(train_loader)
+            epoch_accuracy = epoch_correct / epoch_total
+
+            print(f"Epoch {epoch} Summary:")
+            print(f"  Average Loss: {epoch_loss:.4f}")
+            print(f"  Epoch Accuracy: {epoch_accuracy:.4f}")
+
+            # WandB logging
+            wandb.log({
+                'epoch': epoch,
+                'loss': epoch_loss,
+                'accuracy': epoch_accuracy
+            })
+
+            # Learning rate scheduling
+            scheduler.step(epoch_loss)
     test()
 
 if __name__ == '__main__':
-    #with wandb.init(project='MLP', name='MLP_demo'):
+    with wandb.init(project='ASL', name='ASL Project'):
         time_start = time.time()
         main()
         time_end = time.time()
