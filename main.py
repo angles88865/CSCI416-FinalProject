@@ -39,7 +39,7 @@ args = parser.parse_args()
 
 # Define a series of transformations for the training data.
 train_transform = transforms.Compose([
-    transforms.Resize((100, 100)), # Resize the images to 100x100 pixels.
+    transforms.Resize((150, 150)), # Resize the images to 150x150 pixels.
     transforms.RandomHorizontalFlip(p=0.5),  # Randomly flip the images horizontally 50% of the time.
     transforms.RandomAffine(  # Apply random affine transformations to the images.
         degrees=(-5, 5),  # Rotate by degrees between -5 and 5.
@@ -60,17 +60,6 @@ test_transform = transforms.Compose([
 
 
 def load_data(data_dir, batch_size, train_val_split=0.8):
-    """
-    Loads the ASL alphabet dataset and returns PyTorch DataLoaders for training, validation, and test.
-
-    Args:
-        data_dir (str): Path to the root directory of the ASL alphabet dataset.
-        batch_size (int): Batch size for the data loaders.
-        train_val_split (float): Proportion of the dataset to use for training (the rest for validation).
-
-    Returns:
-        tuple: (train_loader, val_loader, test_loader)
-    """
     # Define the data transformations
     train_transform = Compose([
         Resize((64, 64)),
