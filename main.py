@@ -20,7 +20,7 @@ parser.add_argument("-num_epoches", dest="num_epoches", type=int, default=40, he
 
 parser.add_argument("-fc_hidden1", dest="fc_hidden1", type=int, default=50, help="dim of hidden neurons")
 parser.add_argument("-fc_hidden2", dest="fc_hidden2", type=int, default=50, help="dim of hidden neurons")
-parser.add_argument("-learning_rate", dest ="learning_rate", type=float, default=0.0001, help = "learning rate")
+parser.add_argument("-learning_rate", dest ="learning_rate", type=float, default=0.00001, help = "learning rate")
 parser.add_argument("-decay", dest ="decay", type=float, default=0.01, help = "learning rate")
 parser.add_argument("-batch_size", dest="batch_size", type=int, default=100, help="batch size")
 parser.add_argument("-dropout", dest ="dropout", type=float, default=0.4, help = "dropout prob")
