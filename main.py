@@ -2,15 +2,15 @@ import torch
 import torchvision.transforms as transforms
 import torchvision
 import PIL
-from torch.utils.data import random_split
+from torch.utils.data import random_split, DataLoader
 import argparse
 import time
+import os
+from torchvision.transforms import Compose, Resize, ToTensor, RandomHorizontalFlip
+from torchvision.datasets import ImageFolder
+
 import wandb
 import torch.optim as optim
-from torch.autograd import Variable
-import numpy as np
-import matplotlib.pyplot as plt
-
 from model import CNNModel
 
 ## input hyper-paras
@@ -18,19 +18,17 @@ parser = argparse.ArgumentParser(description = "nueral networks")
 parser.add_argument("-mode", dest="mode", type=str, default='train', help="train or test")
 parser.add_argument("-num_epoches", dest="num_epoches", type=int, default=40, help="num of epoches")
 
-parser.add_argument("-fc_hidden1", dest="fc_hidden1", type=int, default=100, help="dim of hidden neurons")
-parser.add_argument("-fc_hidden2", dest="fc_hidden2", type=int, default=100, help="dim of hidden neurons")
-parser.add_argument("-learning_rate", dest ="learning_rate", type=float, default=0.001, help = "learning rate")
-parser.add_argument("-decay", dest ="decay", type=float, default=0.5, help = "learning rate")
+parser.add_argument("-fc_hidden1", dest="fc_hidden1", type=int, default=50, help="dim of hidden neurons")
+parser.add_argument("-fc_hidden2", dest="fc_hidden2", type=int, default=50, help="dim of hidden neurons")
+parser.add_argument("-learning_rate", dest ="learning_rate", type=float, default=0.0001, help = "learning rate")
+parser.add_argument("-decay", dest ="decay", type=float, default=0.01, help = "learning rate")
 parser.add_argument("-batch_size", dest="batch_size", type=int, default=100, help="batch size")
 parser.add_argument("-dropout", dest ="dropout", type=float, default=0.4, help = "dropout prob")
 parser.add_argument("-rotation", dest="rotation", type=int, default=10, help="image rotation")
-#parser.add_argument("-load_checkpoint", dest="load_checkpoint", type=str2bool, default=False, help="true of false")
-
 parser.add_argument("-activation", dest="activation", type=str, default='relu', help="activation function")
 parser.add_argument("-channel_out1", dest='channel_out1', type=int, default=64, help="number of channels")
 parser.add_argument("-channel_out2", dest='channel_out2', type=int, default=64, help="number of channels")
-parser.add_argument("-k_size", dest='k_size', type=int, default=4, help="size of filter")
+parser.add_argument("-k_size", dest='k_size', type=int, default=5, help="size of filter")
 parser.add_argument("-pooling_size", dest='pooling_size', type=int, default=2, help="size for max pooling")
 parser.add_argument("-stride", dest='stride', type=int, default=1, help="stride for filter")
 parser.add_argument("-max_stride", dest='max_stride', type=int, default=2, help="stride for max pooling")
@@ -61,70 +59,63 @@ test_transform = transforms.Compose([
 ])
 
 
-def load_data():
-    # get the dataset
-    dataset = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1',
-                                               transform=train_transform)
+def load_data(data_dir, batch_size, train_val_split=0.8):
+    """
+    Loads the ASL alphabet dataset and returns PyTorch DataLoaders for training, validation, and test.
 
-    # Print dataset information
-    print(f"Total dataset size: {len(dataset)}")
-    print(f"Number of classes: {len(dataset.classes)}")
-    print("Class names:", dataset.classes)
+    Args:
+        data_dir (str): Path to the root directory of the ASL alphabet dataset.
+        batch_size (int): Batch size for the data loaders.
+        train_val_split (float): Proportion of the dataset to use for training (the rest for validation).
 
-    dataset_size = len(dataset)
-    train_size = int(0.8 * dataset_size)  # 80% for training
-    val_size = dataset_size - train_size  # Remaining 20% for validation
+    Returns:
+        tuple: (train_loader, val_loader, test_loader)
+    """
+    # Define the data transformations
+    train_transform = Compose([
+        Resize((64, 64)),
+        RandomHorizontalFlip(p=0.5),  # Augmentation for training
+        ToTensor()
+    ])
+    test_transform = Compose([
+        Resize((64, 64)),
+        ToTensor()
+    ])
 
-    train_set, val_set = random_split(dataset, [train_size, val_size])
+    # Paths for train and test data
+    train_path = os.path.join(data_dir, 'asl_alphabet_train', 'asl_alphabet_train')
+    test_path = os.path.join(data_dir, 'asl_alphabet_test', 'asl_alphabet_test')
 
-    # Create data loaders for the training and validation sets.
-    train_loader = torch.utils.data.DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=4,  # Use multiple workers for faster data loading
-        pin_memory=True  # Can improve performance if using GPU
-    )
-    val_loader = torch.utils.data.DataLoader(
-        val_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
+    # Load the training dataset
+    train_dataset = ImageFolder(root=train_path, transform=train_transform)
 
-    # Load the ASL dataset for testing and apply test transformations.
-    test_set = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1/asl_alphabet_test',
-                                                transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(
-        test_set,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
+    # Split the training dataset into training and validation sets
+    dataset_size = len(train_dataset)
+    train_size = int(dataset_size * train_val_split)
+    val_size = dataset_size - train_size
+    train_set, val_set = random_split(
+        train_dataset,
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)  # Ensure reproducibility
     )
 
-    # Debug: Verify data loader
-    print("\nTraining Loader:")
-    for batch_idx, (inputs, labels) in enumerate(train_loader):
-        print(f"Batch {batch_idx}:")
-        print(f"  Input shape: {inputs.shape}")
-        print(f"  Labels shape: {labels.shape}")
-        print(f"  Unique labels in batch: {torch.unique(labels)}")
-        if batch_idx < 2:  # Print only first 2 batches
-            continue
-        break
+    # Create the data loaders
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
-    # Assuming 'labels' is the tensor with your labels
-    unique, counts = np.unique(labels, return_counts=True)
+    print("Contents of test_path:", os.listdir(test_path))
+    print("Contents of train_path:", os.listdir(train_path))
 
-    plt.bar(unique, counts)
-    plt.xlabel('Class Labels')
-    plt.ylabel('Frequency')
-    plt.title('Label Distribution')
-    plt.show()
 
-    return train_loader, test_loader, val_loader
+    # Load the test dataset
+    if not os.path.exists(test_path):
+        raise FileNotFoundError(f"Test directory {test_path} does not exist.")
+    test_set = ImageFolder(root=test_path, transform=test_transform)
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    return train_loader, val_loader, test_loader
+
+
 
 def compute_accuracy(y_pred, y_batch):
 
@@ -146,7 +137,7 @@ def main():
     if use_cuda:
         torch.cuda.manual_seed(72)
 
-    train_loader, test_loader, val_loader = load_data()
+    train_loader, test_loader, val_loader = load_data('./asl-alphabet/versions/1', args.batch_size)
 
     # Define the classes in the ASL dataset.
     classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',

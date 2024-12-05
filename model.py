@@ -9,28 +9,28 @@ class CNNModel(nn.Module):
         ##-----------------------------------------------------------
         ## define the model architecture here
 
-        kernel = 3
+        kernel = 5
         stride = 1
-        padding = 1
+        padding = 2
         kernel_pool = 2
-        stride_pool = 1
+        stride_pool = 2
 
         self.conv = nn.Sequential(
 
-            nn.Conv2d(3, 100, kernel, stride, padding), # 3 input channels (RGB)
-            nn.BatchNorm2d(100),
-            nn.ReLU(),
-            nn.Conv2d(100, 50, kernel, stride, padding),
-            nn.BatchNorm2d(50),
+            nn.Conv2d(3, 64, kernel, stride, padding), # 3 input channels (RGB)
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(kernel_pool, stride_pool),
             nn.Dropout(0.2),
 
-            nn.Conv2d(50, 25, kernel, stride, padding),
-            nn.BatchNorm2d(25),
+            nn.Conv2d(64, 128, kernel, stride, padding),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.Conv2d(25, 10, kernel, stride, padding),
-            nn.BatchNorm2d(10),
+            nn.MaxPool2d(kernel_pool, stride_pool),
+            nn.Dropout(0.2),
+
+            nn.Conv2d(128, 29, kernel, stride, padding),
+            nn.BatchNorm2d(29),
             nn.ReLU(),
             nn.MaxPool2d(kernel_pool, stride_pool),
             nn.Dropout(0.2),
@@ -51,13 +51,13 @@ class CNNModel(nn.Module):
 
         self.dense = nn.Sequential(
 
-            nn.Linear(96040, 1000),
+            nn.Linear(1856, 512),
             nn.ReLU(),
-            nn.Linear(1000, 500),
-            nn.Dropout(0.2),
+            nn.Linear(512, 256),
+            nn.Dropout(0.3),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(500, 250),
+            nn.Dropout(0.3),
+            nn.Linear(256, 29),
 
         )
 
