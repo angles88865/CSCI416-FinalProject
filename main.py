@@ -2,13 +2,15 @@ import torch
 import torchvision.transforms as transforms
 import torchvision
 import PIL
-from torch.utils.data import random_split
+from torch.utils.data import random_split, DataLoader
 import argparse
 import time
+import os
+from torchvision.transforms import Compose, Resize, ToTensor, RandomHorizontalFlip
+from torchvision.datasets import ImageFolder
+
 import wandb
 import torch.optim as optim
-from torch.autograd import Variable
-
 from model import CNNModel
 
 ## input hyper-paras
@@ -16,19 +18,17 @@ parser = argparse.ArgumentParser(description = "nueral networks")
 parser.add_argument("-mode", dest="mode", type=str, default='train', help="train or test")
 parser.add_argument("-num_epoches", dest="num_epoches", type=int, default=40, help="num of epoches")
 
-parser.add_argument("-fc_hidden1", dest="fc_hidden1", type=int, default=100, help="dim of hidden neurons")
-parser.add_argument("-fc_hidden2", dest="fc_hidden2", type=int, default=100, help="dim of hidden neurons")
-parser.add_argument("-learning_rate", dest ="learning_rate", type=float, default=0.001, help = "learning rate")
-parser.add_argument("-decay", dest ="decay", type=float, default=0.5, help = "learning rate")
+parser.add_argument("-fc_hidden1", dest="fc_hidden1", type=int, default=50, help="dim of hidden neurons")
+parser.add_argument("-fc_hidden2", dest="fc_hidden2", type=int, default=50, help="dim of hidden neurons")
+parser.add_argument("-learning_rate", dest ="learning_rate", type=float, default=0.0001, help = "learning rate")
+parser.add_argument("-decay", dest ="decay", type=float, default=0.01, help = "learning rate")
 parser.add_argument("-batch_size", dest="batch_size", type=int, default=100, help="batch size")
 parser.add_argument("-dropout", dest ="dropout", type=float, default=0.4, help = "dropout prob")
 parser.add_argument("-rotation", dest="rotation", type=int, default=10, help="image rotation")
-#parser.add_argument("-load_checkpoint", dest="load_checkpoint", type=str2bool, default=False, help="true of false")
-
 parser.add_argument("-activation", dest="activation", type=str, default='relu', help="activation function")
 parser.add_argument("-channel_out1", dest='channel_out1', type=int, default=64, help="number of channels")
 parser.add_argument("-channel_out2", dest='channel_out2', type=int, default=64, help="number of channels")
-parser.add_argument("-k_size", dest='k_size', type=int, default=4, help="size of filter")
+parser.add_argument("-k_size", dest='k_size', type=int, default=5, help="size of filter")
 parser.add_argument("-pooling_size", dest='pooling_size', type=int, default=2, help="size for max pooling")
 parser.add_argument("-stride", dest='stride', type=int, default=1, help="stride for filter")
 parser.add_argument("-max_stride", dest='max_stride', type=int, default=2, help="stride for max pooling")
@@ -39,6 +39,7 @@ args = parser.parse_args()
 
 # Define a series of transformations for the training data.
 train_transform = transforms.Compose([
+    transforms.Resize((100, 100)), # Resize the images to 100x100 pixels.
     transforms.RandomHorizontalFlip(p=0.5),  # Randomly flip the images horizontally 50% of the time.
     transforms.RandomAffine(  # Apply random affine transformations to the images.
         degrees=(-5, 5),  # Rotate by degrees between -5 and 5.
@@ -57,26 +58,64 @@ test_transform = transforms.Compose([
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # Normalize tensors with mean and standard deviation.
 ])
 
-def load_data():
-    #get the dataset
-    dataset = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1/asl_alphabet_train',
-                                               transform=train_transform)
-    dataset_size = len(dataset)
-    train_size = int(0.8 * dataset_size)  # 80% for training
-    val_size = dataset_size - train_size  # Remaining 20% for validation
 
-    train_set, val_set = random_split(dataset, [train_size, val_size])
+def load_data(data_dir, batch_size, train_val_split=0.8):
+    """
+    Loads the ASL alphabet dataset and returns PyTorch DataLoaders for training, validation, and test.
 
-    # Create data loaders for the training and validation sets.
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=128, shuffle=True, num_workers=8)
-    val_loader = torch.utils.data.DataLoader(val_set, batch_size=128, shuffle=False, num_workers=8)
+    Args:
+        data_dir (str): Path to the root directory of the ASL alphabet dataset.
+        batch_size (int): Batch size for the data loaders.
+        train_val_split (float): Proportion of the dataset to use for training (the rest for validation).
 
-    # Load the ASL dataset for testing and apply test transformations.
-    test_set = torchvision.datasets.ImageFolder(root='./asl-alphabet/versions/1/asl_alphabet_test',
-                                                transform=test_transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=128, shuffle=False, num_workers=8)
+    Returns:
+        tuple: (train_loader, val_loader, test_loader)
+    """
+    # Define the data transformations
+    train_transform = Compose([
+        Resize((64, 64)),
+        RandomHorizontalFlip(p=0.5),  # Augmentation for training
+        ToTensor()
+    ])
+    test_transform = Compose([
+        Resize((64, 64)),
+        ToTensor()
+    ])
 
-    return train_loader, test_loader, val_loader
+    # Paths for train and test data
+    train_path = os.path.join(data_dir, 'asl_alphabet_train', 'asl_alphabet_train')
+    test_path = os.path.join(data_dir, 'asl_alphabet_test', 'asl_alphabet_test')
+
+    # Load the training dataset
+    train_dataset = ImageFolder(root=train_path, transform=train_transform)
+
+    # Split the training dataset into training and validation sets
+    dataset_size = len(train_dataset)
+    train_size = int(dataset_size * train_val_split)
+    val_size = dataset_size - train_size
+    train_set, val_set = random_split(
+        train_dataset,
+        [train_size, val_size],
+        generator=torch.Generator().manual_seed(42)  # Ensure reproducibility
+    )
+
+    # Create the data loaders
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    print("Contents of test_path:", os.listdir(test_path))
+    print("Contents of train_path:", os.listdir(train_path))
+
+
+    # Load the test dataset
+    if not os.path.exists(test_path):
+        raise FileNotFoundError(f"Test directory {test_path} does not exist.")
+    test_set = ImageFolder(root=test_path, transform=test_transform)
+    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    return train_loader, val_loader, test_loader
+
+
 
 def compute_accuracy(y_pred, y_batch):
 
@@ -93,11 +132,12 @@ def main():
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     torch.cuda.set_device(device=0)
+    torch.cuda.empty_cache()
     print("device: ", device)
     if use_cuda:
         torch.cuda.manual_seed(72)
 
-    train_loader, test_loader, val_loader = load_data()
+    train_loader, test_loader, val_loader = load_data('./asl-alphabet/versions/1', args.batch_size)
 
     # Define the classes in the ASL dataset.
     classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
@@ -118,52 +158,76 @@ def main():
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0,
                            amsgrad=False)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, verbose=True,
-                                                     min_lr=0)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, min_lr=0)
 
-    ##  model training
+    # Verify model and data
+    print(f"Model: {model}")
+    print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
+    # Get data loaders
     if args.mode == 'train':
-        model = model.train()  ## model training
-        for epoch in range(num_epoches):  # 10-50
-            ## learning rate
-            #adjust_learning_rate(learning_rate, optimizer, epoch, decay)
+        model.train()
 
-            for batch_id, (x_batch, y_labels) in enumerate(train_loader):
-                x_batch, y_labels = Variable(x_batch).to(device), Variable(y_labels).to(device)
+        for epoch in range(num_epoches):
+            print(f"\nEpoch {epoch}/{num_epoches}")
+            print("-" * 20)
 
-                ## feed input data x into model
-                output_y = model(x_batch)
+            epoch_loss = 0.0
+            epoch_correct = 0
+            epoch_total = 0
 
-                ##---------------------------------------------------
-                ## write loss function below, refer to tutorial slides
-                ##----------------------------------------------------
-                loss = criterion(output_y, y_labels)
+            for batch_idx, (inputs, labels) in enumerate(train_loader):
+                # Move to device
+                inputs, labels = inputs.to(device), labels.to(device)
 
-                ##----------------------------------------
-                ## write back propagation below
-                ##----------------------------------------
+                # Zero the parameter gradients
                 optimizer.zero_grad()
+
+                # Forward pass
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
+                # Backward pass and optimize
                 loss.backward()
-                optimizer.step()  ## update parameters
+                optimizer.step()
 
-                ##------------------------------------------------------
-                ## get the predict result and then compute accuracy below
-                ##------------------------------------------------------
-                # _, y_pred = torch.max(output_y.data, 1)
-                y_pred = torch.argmax(output_y.data, 1)
-                acc = compute_accuracy(y_pred, y_labels)
+                # Compute accuracy
+                _, predicted = torch.max(outputs.data, 1)
+                epoch_total += labels.size(0)
+                epoch_correct += (predicted == labels).sum().item()
 
-                ##----------------------------------------------------------
-                ## loss.item() or use tensorboard to monitor the loss blow
-                ## if use loss.item(), you may use log txt files to save loss
-                ##----------------------------------------------------------
-                print("epoch: ", epoch, "batch_id: ", batch_id, "loss: ", loss.item(), "accuracy: ", acc)
-                wandb.log({'loss': loss.item()})
-                wandb.log({'accuracy': acc})
+                # Batch-level logging
+                batch_acc = (predicted == labels).float().mean().item()
+                print(f"Batch {batch_idx}: Loss = {loss.item():.4f}, Batch Accuracy = {batch_acc:.4f}")
+
+                # Accumulate epoch loss
+                epoch_loss += loss.item()
+
+                # Optional: Break if batch limit reached for debugging
+                # if batch_idx > 10:
+                #     break
+
+            # Epoch-level metrics
+            epoch_loss /= len(train_loader)
+            epoch_accuracy = epoch_correct / epoch_total
+
+            print(f"Epoch {epoch} Summary:")
+            print(f"  Average Loss: {epoch_loss:.4f}")
+            print(f"  Epoch Accuracy: {epoch_accuracy:.4f}")
+
+            # WandB logging
+            wandb.log({
+                'epoch': epoch,
+                'loss': epoch_loss,
+                'accuracy': epoch_accuracy
+            })
+
+            # Learning rate scheduling
+            scheduler.step(epoch_loss)
     test()
 
 if __name__ == '__main__':
-    #with wandb.init(project='MLP', name='MLP_demo'):
+    with wandb.init(project='ASL', name='ASL Project'):
         time_start = time.time()
         main()
         time_end = time.time()
