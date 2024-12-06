@@ -37,18 +37,6 @@ class CNNModel(nn.Module):
 
         )
 
-        output_size_func = lambda input_size, kernel_size, padding, stride: (
-                                                                                        input_size - kernel_size + 2 * padding) // stride + 1
-        in_size = 28
-        output_size = 0
-        for i in range(4):
-            output_size = output_size_func(in_size, kernel, padding, stride)
-            if i in [0, 1]:
-                output_size = (output_size - kernel_pool) // stride_pool + 1
-            in_size = output_size
-
-        out_size = 10 * output_size * output_size
-
         self.dense = nn.Sequential(
 
             nn.Linear(1856, 512),

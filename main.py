@@ -1,6 +1,4 @@
 import torch
-import torchvision.transforms as transforms
-import torchvision
 import PIL
 from torch.utils.data import random_split, DataLoader
 import argparse
@@ -8,10 +6,12 @@ import time
 import os
 from torchvision.transforms import Compose, Resize, ToTensor, RandomHorizontalFlip
 from torchvision.datasets import ImageFolder
-
+from torch.autograd import Variable
 import wandb
 import torch.optim as optim
 from model import CNNModel
+from torchvision import transforms
+
 
 ## input hyper-paras
 parser = argparse.ArgumentParser(description = "nueral networks")
@@ -122,10 +122,6 @@ def compute_accuracy(y_pred, y_batch):
 	accy = (y_pred==y_batch).sum().item()/y_batch.size(0)
 	return accy
 
-def test():
-    # Your testing code here
-    pass
-
 def main():
 
     #get the device
@@ -139,10 +135,6 @@ def main():
 
     train_loader, test_loader, val_loader = load_data('./asl-alphabet/versions/1', args.batch_size)
 
-    # Define the classes in the ASL dataset.
-    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
-               'V', 'W', 'X', 'Y', 'Z']
-
     # Your training code here
     model = CNNModel(args)
 
@@ -151,18 +143,13 @@ def main():
 
     ## initialize hyper-parameters
     num_epoches = args.num_epoches
-    decay = args.decay
     learning_rate = args.learning_rate
 
-    ## define loss function, optimizer, and scheduler
+    ## define criterion, optimizer, and scheduler
     criterion = torch.nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(0.9, 0.999), eps=1e-08, weight_decay=0,
                            amsgrad=False)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10, min_lr=0)
-
-    # Verify model and data
-    print(f"Model: {model}")
-    print(f"Total trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
     # Get data loaders
     if args.mode == 'train':
@@ -203,10 +190,6 @@ def main():
                 # Accumulate epoch loss
                 epoch_loss += loss.item()
 
-                # Optional: Break if batch limit reached for debugging
-                # if batch_idx > 10:
-                #     break
-
             # Epoch-level metrics
             epoch_loss /= len(train_loader)
             epoch_accuracy = epoch_correct / epoch_total
@@ -224,7 +207,21 @@ def main():
 
             # Learning rate scheduling
             scheduler.step(epoch_loss)
-    test()
+
+    test_acc = 0.0
+
+    model.eval()
+    with torch.no_grad():
+        for batch_id, (x_batch, y_labels) in enumerate(test_loader):
+            x_batch, y_labels = Variable(x_batch).to(device), Variable(y_labels).to(device)
+
+            output_y = model(x_batch)
+            y_pred = torch.argmax(output_y.data, 1)
+
+            test_acc = test_acc + compute_accuracy(y_pred, y_labels)
+
+    print("test accuracy: ", test_acc / len(test_loader))
+
 
 if __name__ == '__main__':
     with wandb.init(project='ASL', name='ASL Project'):
