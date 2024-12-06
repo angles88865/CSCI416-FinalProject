@@ -38,7 +38,7 @@ args = parser.parse_args()
 
 # Define a series of transformations for the training data.
 train_transform = transforms.Compose([
-    transforms.Resize((100, 100)),  # Resize the images to 100x100 pixels.
+    transforms.Resize((150, 150)),  # Resize the images to 150x150 pixels.
     transforms.RandomHorizontalFlip(p=0.5),  # Randomly flip the images horizontally 50% of the time.
     transforms.RandomAffine(  # Apply random affine transformations to the images.
         degrees=(-5, 5),  # Rotate by degrees between -5 and 5.
@@ -59,17 +59,7 @@ test_transform = transforms.Compose([
 
 
 def load_data(data_dir, batch_size, train_val_split=0.8):
-    """
-    Loads the ASL alphabet dataset and returns PyTorch DataLoaders for training, validation, and test.
 
-    Args:
-        data_dir (str): Path to the root directory of the ASL alphabet dataset.
-        batch_size (int): Batch size for the data loaders.
-        train_val_split (float): Proportion of the dataset to use for training (the rest for validation).
-
-    Returns:
-        tuple: (train_loader, val_loader, test_loader)
-    """
     # Define the data transformations
     train_transform = Compose([
         Resize((64, 64)),
@@ -101,16 +91,13 @@ def load_data(data_dir, batch_size, train_val_split=0.8):
     # Create the data loaders
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
 
-    print("Contents of test_path:", os.listdir(test_path))
-    print("Contents of train_path:", os.listdir(train_path))
-
     # Load the test dataset
     if not os.path.exists(test_path):
         raise FileNotFoundError(f"Test directory {test_path} does not exist.")
     test_set = ImageFolder(root=test_path, transform=test_transform)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
-    return train_loader, test_loader. test_set
+    return train_loader, test_loader, test_set
 
 
 def compute_accuracy(y_pred, y_batch):
@@ -217,7 +204,7 @@ def main():
             output_y = model(x_batch)
             _, predicted = torch.max(output_y, 1)
 
-            correct += (predicted == labels).sum().item()
+            correct += (predicted == y_labels).sum().item()
             pred_vec.append(predicted)
         pred_vec = torch.cat(pred_vec)
 
