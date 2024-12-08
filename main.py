@@ -73,6 +73,7 @@ def load_data(data_dir, batch_size, train_val_split=0.8):
     # Paths for train and test data
     train_path = os.path.join(data_dir, 'asl_alphabet_train', 'asl_alphabet_train')
     test_path = os.path.join(data_dir, 'asl_alphabet_test', 'asl_alphabet_test')
+    live_test_path = os.path.join(data_dir, 'LiveActionConverted')
 
     # Load the training dataset
     train_dataset = ImageFolder(root=train_path, transform=train_transform)
@@ -96,12 +97,93 @@ def load_data(data_dir, batch_size, train_val_split=0.8):
     test_set = ImageFolder(root=test_path, transform=test_transform)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
-    return train_loader, test_loader, test_set
+    #Load live test dataset
+    if not os.path.exists(live_test_path):
+        raise FileNotFoundError(f"Live test directory {live_test_path} does not exist.")
+    live_test_set = ImageFolder(root=live_test_path, transform=test_transform)
+    live_test_loader = DataLoader(live_test_set, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    return train_loader, test_loader, test_set, live_test_loader, live_test_set
 
 
 def compute_accuracy(y_pred, y_batch):
     accy = (y_pred == y_batch).sum().item() / y_batch.size(0)
     return accy
+
+
+def visualize_incorrect_predictions(pred_vec, set, set_loader):
+
+    # Find incorrect images for each class
+    incorrect_images = []
+    incorrect_preds = []
+
+    ground_truths = torch.tensor(set.targets)
+    pred_vec = pred_vec.cpu().numpy()
+    incorrect_mask = pred_vec != ground_truths
+
+    for label in range(29):
+        # Find indices of incorrectly classified images for this label
+        class_incorrect_indices = np.where((ground_truths.numpy() == label) & incorrect_mask)[0]
+        assert np.all(np.logical_or(incorrect_mask, ~incorrect_mask)), "Incorrect mask must be boolean."
+
+        if len(class_incorrect_indices) > 0:
+            incorrect_index = class_incorrect_indices[0]
+
+            incorrect_image, true_label = set_loader.dataset[incorrect_index]
+            incorrect_image = (incorrect_image * 255).permute(1, 2, 0).numpy().astype(np.uint8)
+
+            incorrect_images.append(incorrect_image)
+            incorrect_preds.append(pred_vec[incorrect_index])
+        else:
+            print(f"No incorrect images for class {label}. Adding placeholder.")
+            incorrect_images.append(np.zeros((64, 64, 3), dtype=np.uint8))
+            incorrect_preds.append(label)
+
+    # Visualize
+    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
+               'V', 'W', 'X', 'Y', 'Z', 'del', 'nothing', 'space']
+
+    print(f"pred_vec shape: {pred_vec.shape}, ground_truths shape: {ground_truths.shape}")
+    print(f"Number of incorrect images: {len([img for img in incorrect_images if np.any(img)])}")
+
+    # Filter out only incorrect predictions
+    filtered_images = []
+    for idx in range(len(ground_truths)):
+        true_label = classes[ground_truths[idx]]
+        pred_label = classes[incorrect_preds[idx]]
+        if true_label != pred_label:
+            incorrect_image = incorrect_images[idx]
+            filtered_images.append((incorrect_image, true_label, pred_label))
+
+    # Handle case where there are no incorrect predictions
+    if len(filtered_images) == 0:
+        print("No incorrect predictions to display.")
+        exit()
+
+    # Visualize only the filtered incorrect predictions
+    num_images = len(filtered_images)
+    # Calculate the grid size
+    cols = 4  # Number of columns
+    rows = (num_images + cols - 1) // cols  # Calculate rows dynamically based on the number of images
+
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 8))
+
+    # Flatten axes for easier indexing, in case of multiple rows and columns
+    axes = axes.flatten() if num_images > 1 else [axes]
+
+    for i in range(num_images):
+        img, true_label, pred_label = filtered_images[i]
+        axes[i].imshow(img)
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+        axes[i].set_title(f"True: {true_label}\nPred: {pred_label}", fontsize=10)
+
+    # Turn off any unused axes
+    for j in range(num_images, len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout()
+    plt.show()
 
 
 def main():
@@ -114,7 +196,7 @@ def main():
     if use_cuda:
         torch.cuda.manual_seed(72)
 
-    train_loader, test_loader, test_set = load_data('./asl-alphabet/versions/1', args.batch_size)
+    train_loader, test_loader, test_set, live_loader, live_set = load_data('./asl-alphabet/versions/1', args.batch_size)
 
     # Your training code here
     model = CNNModel(args)
@@ -190,11 +272,14 @@ def main():
             scheduler.step(epoch_loss)
 
     test_acc = 0.0
+    live_acc = 0.0
 
     model.eval()
     pred_vec = []
+    live_vec = []
 
     with torch.no_grad():
+        #dataset test data
         for data in test_loader:
             x_batch, y_labels = data
             x_batch, y_labels = x_batch.to(device), y_labels.to(device)
@@ -205,81 +290,26 @@ def main():
             test_acc += compute_accuracy(y_pred, y_labels)
             pred_vec.append(y_pred)
 
+        # live test data
+        for data in live_loader:
+            x_batch, y_labels = data
+            x_batch, y_labels = x_batch.to(device), y_labels.to(device)
+
+            output_y = model(x_batch)
+            y_pred = torch.argmax(output_y.data, 1)
+
+            live_acc += compute_accuracy(y_pred, y_labels)
+            live_vec.append(y_pred)
+
         pred_vec = torch.cat(pred_vec)
+        live_vec = torch.cat(live_vec)
 
-    print("test accuracy: ", test_acc / len(test_loader))
+    print("dataset test accuracy: ", test_acc / len(test_loader))
+    print("live test accuracy: ", live_acc / len(live_loader))
 
-    # Find incorrect images for each class
-    incorrect_images = []
-    incorrect_preds = []
+    visualize_incorrect_predictions(pred_vec, test_set, test_loader)
+    visualize_incorrect_predictions(live_vec, live_set, live_loader)
 
-    ground_truths = torch.tensor(test_set.targets)
-    pred_vec = pred_vec.cpu().numpy()
-    incorrect_mask = pred_vec != ground_truths
-
-    for label in range(29):
-        # Find indices of incorrectly classified images for this label
-        class_incorrect_indices = np.where((ground_truths.numpy() == label) & incorrect_mask)[0]
-        assert np.all(np.logical_or(incorrect_mask, ~incorrect_mask)), "Incorrect mask must be boolean."
-
-        if len(class_incorrect_indices) > 0:
-            incorrect_index = class_incorrect_indices[0]
-
-            incorrect_image, true_label = test_loader.dataset[incorrect_index]
-            incorrect_image = (incorrect_image * 255).permute(1, 2, 0).numpy().astype(np.uint8)
-
-            incorrect_images.append(incorrect_image)
-            incorrect_preds.append(pred_vec[incorrect_index])
-        else:
-            print(f"No incorrect images for class {label}. Adding placeholder.")
-            incorrect_images.append(np.zeros((64, 64, 3), dtype=np.uint8))
-            incorrect_preds.append(label)
-
-    # Visualize
-    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
-               'V', 'W', 'X', 'Y', 'Z', 'del', 'nothing', 'space']
-
-    print(f"pred_vec shape: {pred_vec.shape}, ground_truths shape: {ground_truths.shape}")
-    print(f"Number of incorrect images: {len([img for img in incorrect_images if np.any(img)])}")
-
-    # Filter out only incorrect predictions
-    filtered_images = []
-    for idx in range(len(ground_truths)):
-        true_label = classes[ground_truths[idx]]
-        pred_label = classes[incorrect_preds[idx]]
-        if true_label != pred_label:
-            incorrect_image = incorrect_images[idx]
-            filtered_images.append((incorrect_image, true_label, pred_label))
-
-    # Handle case where there are no incorrect predictions
-    if len(filtered_images) == 0:
-        print("No incorrect predictions to display.")
-        exit()
-
-    # Visualize only the filtered incorrect predictions
-    num_images = len(filtered_images)
-    # Calculate the grid size
-    cols = 4  # Number of columns
-    rows = (num_images + cols - 1) // cols  # Calculate rows dynamically based on the number of images
-
-    fig, axes = plt.subplots(rows, cols, figsize=(15, 8))
-
-    # Flatten axes for easier indexing, in case of multiple rows and columns
-    axes = axes.flatten() if num_images > 1 else [axes]
-
-    for i in range(num_images):
-        img, true_label, pred_label = filtered_images[i]
-        axes[i].imshow(img)
-        axes[i].set_xticks([])
-        axes[i].set_yticks([])
-        axes[i].set_title(f"True: {true_label}\nPred: {pred_label}", fontsize=10)
-
-    # Turn off any unused axes
-    for j in range(num_images, len(axes)):
-        fig.delaxes(axes[j])
-
-    plt.tight_layout()
-    plt.show()
 
 
 if __name__ == '__main__':
