@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 ## input hyper-paras
 parser = argparse.ArgumentParser(description="nueral networks")
 parser.add_argument("-mode", dest="mode", type=str, default='train', help="train or test")
-parser.add_argument("-num_epoches", dest="num_epoches", type=int, default=40, help="num of epoches")
+parser.add_argument("-num_epoches", dest="num_epoches", type=int, default=1, help="num of epoches")
 
 parser.add_argument("-fc_hidden1", dest="fc_hidden1", type=int, default=50, help="dim of hidden neurons")
 parser.add_argument("-fc_hidden2", dest="fc_hidden2", type=int, default=50, help="dim of hidden neurons")
@@ -59,7 +59,6 @@ test_transform = transforms.Compose([
 
 
 def load_data(data_dir, batch_size, train_val_split=0.8):
-
     # Define the data transformations
     train_transform = Compose([
         Resize((64, 64)),
@@ -176,7 +175,7 @@ def main():
             epoch_loss /= len(train_loader)
             epoch_accuracy = epoch_correct / epoch_total
 
-            print(f"Epoch {epoch} Summary:")
+            print(f"Epoch {epoch + 1} Summary:")
             print(f"  Average Loss: {epoch_loss:.4f}")
             print(f"  Epoch Accuracy: {epoch_accuracy:.4f}")
 
@@ -194,7 +193,6 @@ def main():
 
     model.eval()
     pred_vec = []
-    correct = 0
 
     with torch.no_grad():
         for data in test_loader:
@@ -202,33 +200,87 @@ def main():
             x_batch, y_labels = x_batch.to(device), y_labels.to(device)
 
             output_y = model(x_batch)
-            _, predicted = torch.max(output_y, 1)
+            y_pred = torch.argmax(output_y.data, 1)
 
-            correct += (predicted == y_labels).sum().item()
-            pred_vec.append(predicted)
+            test_acc += compute_accuracy(y_pred, y_labels)
+            pred_vec.append(y_pred)
+
         pred_vec = torch.cat(pred_vec)
 
     print("test accuracy: ", test_acc / len(test_loader))
 
-    # visualize wrongly classified image for each class
+    # Find incorrect images for each class
+    incorrect_images = []
+    incorrect_preds = []
+
+    ground_truths = torch.tensor(test_set.targets)
     pred_vec = pred_vec.cpu().numpy()
-    ground_truths = np.asarray(test_set.targets)
     incorrect_mask = pred_vec != ground_truths
-    incorrect_images = [test_set.data[(ground_truths == label) & incorrect_mask][0] for label in range(10)]
-    pred_results = [pred_vec[(ground_truths == label) & incorrect_mask][0] for label in range(10)]
 
-    # show images
-    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'del', 'nothing', 'space']
+    for label in range(29):
+        # Find indices of incorrectly classified images for this label
+        class_incorrect_indices = np.where((ground_truths.numpy() == label) & incorrect_mask)[0]
+        assert np.all(np.logical_or(incorrect_mask, ~incorrect_mask)), "Incorrect mask must be boolean."
 
-    fig, axes = plt.subplots(2, 5, figsize=(12, 6))
-    i = 0
-    for row in axes:
-        for axis in row:
-            axis.set_xticks([])
-            axis.set_yticks([])
-            axis.set_xlabel("Predicted: %s" % classes[pred_results[i]], fontsize=14)
-            axis.imshow(incorrect_images[i])
-            i += 1
+        if len(class_incorrect_indices) > 0:
+            incorrect_index = class_incorrect_indices[0]
+
+            incorrect_image, true_label = test_loader.dataset[incorrect_index]
+            incorrect_image = (incorrect_image * 255).permute(1, 2, 0).numpy().astype(np.uint8)
+
+            incorrect_images.append(incorrect_image)
+            incorrect_preds.append(pred_vec[incorrect_index])
+        else:
+            print(f"No incorrect images for class {label}. Adding placeholder.")
+            incorrect_images.append(np.zeros((64, 64, 3), dtype=np.uint8))
+            incorrect_preds.append(label)
+
+    # Visualize
+    classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U',
+               'V', 'W', 'X', 'Y', 'Z', 'del', 'nothing', 'space']
+
+    print(f"pred_vec shape: {pred_vec.shape}, ground_truths shape: {ground_truths.shape}")
+    print(f"Number of incorrect images: {len([img for img in incorrect_images if np.any(img)])}")
+
+    # Filter out only incorrect predictions
+    filtered_images = []
+    for idx in range(len(ground_truths)):
+        true_label = classes[ground_truths[idx]]
+        pred_label = classes[incorrect_preds[idx]]
+        if true_label != pred_label:
+            incorrect_image = incorrect_images[idx]
+            filtered_images.append((incorrect_image, true_label, pred_label))
+
+    # Handle case where there are no incorrect predictions
+    if len(filtered_images) == 0:
+        print("No incorrect predictions to display.")
+        exit()
+
+    # Visualize only the filtered incorrect predictions
+    num_images = len(filtered_images)
+    # Calculate the grid size
+    cols = 4  # Number of columns
+    rows = (num_images + cols - 1) // cols  # Calculate rows dynamically based on the number of images
+
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 8))
+
+    # Flatten axes for easier indexing, in case of multiple rows and columns
+    axes = axes.flatten() if num_images > 1 else [axes]
+
+    for i in range(num_images):
+        img, true_label, pred_label = filtered_images[i]
+        axes[i].imshow(img)
+        axes[i].set_xticks([])
+        axes[i].set_yticks([])
+        axes[i].set_title(f"True: {true_label}\nPred: {pred_label}", fontsize=10)
+
+    # Turn off any unused axes
+    for j in range(num_images, len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout()
+    plt.show()
+
 
 if __name__ == '__main__':
     with wandb.init(project='ASL', name='ASL Project'):
