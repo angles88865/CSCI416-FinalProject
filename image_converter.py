@@ -24,33 +24,13 @@ def resize_images_in_directory(input_dir, output_dir, size=(200, 200)):
                 with Image.open(input_path) as img:
                     # Resize and save the image
                     img_resized = img.resize(size, Image.Resampling.LANCZOS)
-                    img_resized.save(output_path)
+                    img_rotated = img_resized.rotate(270, expand=True)
+                    img_rotated.save(output_path)
                     print(f"Resized and saved: {output_path}")
             except Exception as e:
                 print(f"Skipping {filename}: {e}")
     except Exception as e:
         print(f"Error processing directory: {e}")
-
-def rotate_images(input_dir, output_dir, rotation_angle=90):
-    """
-    Rotates all images in the input directory and saves them to the output directory.
-
-    :param input_dir: Directory containing the input images
-    :param output_dir: Directory to save the rotated images
-    :param rotation_angle: Angle to rotate the images (in degrees, counterclockwise)
-    """
-    os.makedirs(output_dir, exist_ok=True)
-
-    for filename in os.listdir(input_dir):
-        input_path = os.path.join(input_dir, filename)
-        output_path = os.path.join(output_dir, filename)
-        try:
-            with Image.open(input_path) as img:
-                img_rotated = img.rotate(rotation_angle, expand=True)
-                img_rotated.save(output_path)
-                print(f"Rotated and saved: {output_path}")
-        except Exception as e:
-            print(f"Skipping {filename}: {e}")
 
 
 # Example usage
@@ -60,4 +40,4 @@ if __name__ == "__main__":
     for c in classes:
         input_directory = f"asl-alphabet/LiveAction/{c}"
         output_directory = f"asl-alphabet/LiveActionConverted/{c}"
-        rotate_images(input_directory, output_directory, 270)
+        resize_images_in_directory(input_directory, output_directory)
